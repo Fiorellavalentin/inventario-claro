@@ -1,17 +1,23 @@
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 from datetime import date, timedelta
 
-st.set_page_config(page_title="Control de Inventario y Valoración", layout="wide")
+st.set_page_config(page_title="Control de Inventario y Valoracion", layout="wide")
 
 # ---------------------------------------------------------------------------
-# CONEXIÓN A SUPABASE (Postgres)
+# CONEXION A SUPABASE (Postgres)
 # ---------------------------------------------------------------------------
 
 @st.cache_resource
 def get_engine():
-    return create_engine(st.secrets["DB_URL"], pool_pre_ping=True)
+    from urllib.parse import quote_plus
+    pwd = quote_plus(st.secrets["DB_PASSWORD"])
+    host = st.secrets["DB_HOST"]
+    user = st.secrets["DB_USER"]
+    url = f"postgresql+psycopg2://{user}:{pwd}@{host}:5432/postgres"
+    return create_engine(url, pool_pre_ping=True)
 
 engine = get_engine()
 
@@ -24,7 +30,7 @@ def run_exec(sql, params=None):
         conn.execute(text(sql), params or {})
 
 # ---------------------------------------------------------------------------
-# ACCESO CON CONTRASEÑA (protección básica del link público)
+# ACCESO CON CONTRASENA (proteccion basica del link publico)
 # ---------------------------------------------------------------------------
 
 def check_password():
@@ -32,14 +38,14 @@ def check_password():
         st.session_state.auth_ok = False
     if st.session_state.auth_ok:
         return True
-    st.title("🔒 Control de Inventario")
-    pwd = st.text_input("Contraseña de acceso", type="password")
+    st.title("Control de Inventario")
+    pwd = st.text_input("Contrasena de acceso", type="password")
     if st.button("Ingresar"):
         if pwd == st.secrets.get("APP_PASSWORD", ""):
             st.session_state.auth_ok = True
             st.rerun()
         else:
-            st.error("Contraseña incorrecta.")
+            st.error("Contrasena incorrecta.")
     return False
 
 if not check_password():
@@ -72,7 +78,7 @@ Asunto: Solicitud de Nota de Credito pendiente - IMEI {row['imei']}
 Estimados senores de Claro,
 
 Por medio del presente, {distribuidor} solicita la emision de la Nota de Credito
-correspondiente al siguiente equipo, dado que a la fecha no ha sido emitida de forma automatica:
+correspondiente al siguiente equipo:
 
 - Marca / Modelo: {row['marca']} {row['modelo']}
 - IMEI: {row['imei']}
@@ -83,9 +89,7 @@ correspondiente al siguiente equipo, dado que a la fecha no ha sido emitida de f
 - Precio de venta: {money(row['precio_venta'])}
 - Diferencia a favor del distribuidor: {money(diferencia)}
 
-Segun la politica comercial vigente, esta diferencia debe ser reconocida mediante Nota de Credito.
-Han transcurrido mas de {dias_limite} dias desde la venta sin que se haya emitido dicho documento,
-por lo que solicitamos su regularizacion a la brevedad.
+Han transcurrido mas de {dias_limite} dias desde la venta sin que se haya emitido dicho documento.
 
 Quedamos atentos a su respuesta.
 
@@ -141,7 +145,7 @@ if page == "Dashboard":
         c3.metric("Casos con perdida", len(perdidas))
         c4.metric("NC pendientes", len(nc_pendientes), f"{money(nc_pendientes['monto_nc'].sum())} por recuperar")
         if len(vencidos):
-            st.error(f"Atencion: {len(vencidos)} equipo(s) con NC vencida sin respuesta de Claro. Revisa la pestana 'Notas de credito'.")
+            st.error(f"Atencion: {len(vencidos)} equipo(s) con NC vencida. Revisa 'Notas de credito'.")
         st.subheader("Reclamos activos")
         reclamos = run_query("select * from reclamos where estado = 'pendiente' order by fecha_envio desc")
         if len(reclamos) == 0:
@@ -276,11 +280,7 @@ elif page == "Carga masiva":
             )
             ya_registrados = set(existentes[campo_db].tolist()) if len(existentes) else set()
             if ya_registrados:
-                problemas.append(f"{len(ya_registrados)} codigo(s) ya existen en el inventario y seran omitidos.")
-            largo_esperado = 19 if categoria_m == "sim" else 15
-            sospechosos = df_carga[df_carga[col_clave].str.len().between(largo_esperado - 1, largo_esperado + 1) == False]
-            if len(sospechosos):
-                problemas.append(f"{len(sospechosos)} codigo(s) tienen largo distinto al esperado (~{largo_esperado} digitos).")
+                problemas.append(f"{len(ya_registrados)} codigo(s) ya existen y seran omitidos.")
             for p in problemas:
                 st.warning(p)
             df_final = df_carga.drop_duplicates(subset=[col_clave], keep="first")
@@ -311,7 +311,7 @@ elif page == "Carga masiva":
                                 values (:imei, :iccid, :marca, :modelo, :categoria, :fecha_compra, :precio_compra, :factura, :notas)"""),
                         filas,
                     )
-                st.success(f"{len(filas)} registro(s) cargados correctamente (factura {factura_m or 'sin numero'}).")
+                st.success(f"{len(filas)} registro(s) cargados correctamente.")
                 st.balloons()
 
 # ---------------------------------------------------------------------------
@@ -341,7 +341,7 @@ elif page == "Registrar venta":
             if precio_venta > 0:
                 m = precio_venta - float(eq_row["precio_compra"])
                 if m < 0:
-                    st.warning(f"Margen negativo: {money(m)}. Quedara marcado como pendiente de Nota de Credito de Claro.")
+                    st.warning(f"Margen negativo: {money(m)}. Quedara como pendiente de Nota de Credito.")
                 else:
                     st.success(f"Margen positivo: {money(m)}")
             submitted = st.form_submit_button("Registrar venta")
@@ -430,7 +430,7 @@ elif page == "Notas de credito":
 
 elif page == "Reclamos":
     st.title("Reclamos a Claro")
-    st.caption("Casos donde la Nota de Credito no fue emitida a tiempo y se envio un reclamo.")
+    st.caption("Casos donde la Nota de Credito no fue emitida a tiempo.")
     reclamos = run_query("select * from reclamos order by fecha_envio desc")
     if len(reclamos) == 0:
         st.info("No hay reclamos generados todavia.")
