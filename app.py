@@ -30,7 +30,7 @@ def run_exec(sql, params=None):
         conn.execute(text(sql), params or {})
 
 # ---------------------------------------------------------------------------
-# ACCESO CON CONTRASENA (proteccion basica del link publico)
+# ACCESO CON CONTRASENA
 # ---------------------------------------------------------------------------
 
 def check_password():
@@ -82,6 +82,7 @@ correspondiente al siguiente equipo:
 
 - Marca / Modelo: {row['marca']} {row['modelo']}
 - IMEI: {row['imei']}
+- Codigo de producto: {row.get('codigo_producto') or 'N/D'}
 - Fecha de compra: {row['fecha_compra']}
 - Precio de compra: {money(row['precio_compra'])}
 - Factura de compra: {row['factura_compra'] or 'N/D'}
@@ -161,7 +162,7 @@ elif page == "Inventario":
     st.title("Inventario")
     st.caption("Todos los equipos y SIM registrados.")
     col1, col2, col3 = st.columns(3)
-    busca = col1.text_input("Buscar por IMEI / ICCID / modelo")
+    busca = col1.text_input("Buscar por IMEI / ICCID / modelo / codigo")
     f_estado = col2.selectbox("Estado", ["Todos", "stock", "vendido"])
     f_nc = col3.selectbox("Estado NC", ["Todos", "pendiente", "emitida", "reclamada", "no_aplica"])
     equipos = run_query("select * from equipos order by created_at desc")
@@ -173,14 +174,16 @@ elif page == "Inventario":
                 equipos["imei"].astype(str).str.lower().str.contains(b, na=False)
                 | equipos["iccid"].astype(str).str.lower().str.contains(b, na=False)
                 | equipos["modelo"].astype(str).str.lower().str.contains(b, na=False)
+                | equipos["codigo_producto"].astype(str).str.lower().str.contains(b, na=False)
             )
             equipos = equipos[mask]
         if f_estado != "Todos":
             equipos = equipos[equipos["estado"] == f_estado]
         if f_nc != "Todos":
             equipos = equipos[equipos["estado_nc"] == f_nc]
-        show = equipos[["estado", "marca", "modelo", "imei", "iccid", "precio_compra",
-                         "fecha_compra", "precio_venta", "fecha_venta", "margen", "estado_nc"]]
+        show = equipos[["estado", "marca", "modelo", "codigo_producto", "imei", "iccid",
+                         "precio_compra", "fecha_compra", "precio_venta", "fecha_venta",
+                         "margen", "estado_nc"]]
         st.dataframe(show, use_container_width=True, hide_index=True)
     else:
         st.info("No hay equipos registrados todavia.")
@@ -201,6 +204,7 @@ elif page == "Registrar compra":
         imei = c4.text_input("IMEI")
         iccid = c5.text_input("ICCID")
         factura = c6.text_input("N de factura Claro")
+        codigo_producto = st.text_input("Codigo de producto", placeholder="ej: 000000000070058426")
         c7, c8, c9 = st.columns(3)
         fecha_compra = c7.date_input("Fecha de compra", value=date.today())
         precio_compra = c8.number_input("Precio de compra (S/)", min_value=0.0, step=0.01)
@@ -216,10 +220,13 @@ elif page == "Registrar compra":
             else:
                 run_exec(
                     """insert into equipos
-                       (imei, iccid, marca, modelo, categoria, fecha_compra, precio_compra, factura_compra, notas)
-                       values (:imei, :iccid, :marca, :modelo, :categoria, :fecha_compra, :precio_compra, :factura, :notas)""",
+                       (imei, iccid, marca, modelo, categoria, fecha_compra, precio_compra,
+                        factura_compra, notas, codigo_producto)
+                       values (:imei, :iccid, :marca, :modelo, :categoria, :fecha_compra,
+                               :precio_compra, :factura, :notas, :codigo_producto)""",
                     dict(imei=imei, iccid=iccid, marca=marca, modelo=modelo, categoria=categoria,
-                         fecha_compra=fecha_compra, precio_compra=precio_compra, factura=factura, notas=notas),
+                         fecha_compra=fecha_compra, precio_compra=precio_compra, factura=factura,
+                         notas=notas, codigo_producto=codigo_producto or None),
                 )
                 st.success("Compra registrada correctamente.")
 
@@ -240,6 +247,8 @@ elif page == "Carga masiva":
     modelo_m = c5.text_input("Modelo (comun)", value="SIM Card" if categoria_m == "sim" else "")
     precio_m = c6.number_input("Precio de compra unitario (S/)", min_value=0.0, step=0.01)
     st.markdown("**2. Lista de codigos**")
+    st.caption("Para SIM se necesita la columna ICCID; para equipos, la columna IMEI. "
+               "Columnas opcionales: MARCA, MODELO, PRECIO_COMPRA, CODIGO_PRODUCTO.")
     metodo = st.radio("Metodo de carga", ["Subir archivo Excel/CSV", "Pegar lista de codigos"], horizontal=True)
     df_carga = None
     if metodo == "Subir archivo Excel/CSV":
@@ -303,12 +312,15 @@ elif page == "Carga masiva":
                         precio_compra=float(r.get("PRECIO_COMPRA") or precio_m),
                         factura=factura_m,
                         notas="Carga masiva",
+                        codigo_producto=r.get("CODIGO_PRODUCTO") or None,
                     ))
                 with engine.begin() as conn:
                     conn.execute(
                         text("""insert into equipos
-                                (imei, iccid, marca, modelo, categoria, fecha_compra, precio_compra, factura_compra, notas)
-                                values (:imei, :iccid, :marca, :modelo, :categoria, :fecha_compra, :precio_compra, :factura, :notas)"""),
+                                (imei, iccid, marca, modelo, categoria, fecha_compra, precio_compra,
+                                 factura_compra, notas, codigo_producto)
+                                values (:imei, :iccid, :marca, :modelo, :categoria, :fecha_compra,
+                                        :precio_compra, :factura, :notas, :codigo_producto)"""),
                         filas,
                     )
                 st.success(f"{len(filas)} registro(s) cargados correctamente.")
